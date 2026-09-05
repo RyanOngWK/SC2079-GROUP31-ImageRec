@@ -2,13 +2,12 @@ import os
 import shutil
 import time
 import glob
-import torch
-from PIL import Image
 import cv2
 import random
 import string
 import numpy as np
-import random
+import pandas as pd
+from PIL import Image
 
 def get_random_string(length):
     """
@@ -28,11 +27,48 @@ def get_random_string(length):
 
 def load_model():
     """
-    Load the model from the local directory
+    Load the YOLO26 model from the local directory using the Ultralytics package.
+
+    NOTE: The checkpoint must be a YOLO26 model trained with the
+    YOLO26_Training.ipynb notebook. The legacy YOLOv5 checkpoints in the
+    ../Weights folder cannot be loaded by YOLO26 and must be retrained first.
     """
-    #model = torch.hub.load('./', 'custom', path='YOLOv5_new.pt', source='local')
-    model = torch.hub.load('./', 'custom', path='Week_9.pt', source='local')
+    from ultralytics import YOLO
+    model = YOLO('YOLO26_Week_9.pt')
     return model
+
+def _results_to_df(model, image):
+    """
+    Run a YOLO26 model on a PIL image and return a DataFrame with one row per
+    detection, containing the columns 'name', 'confidence', 'xmin', 'ymin',
+    'xmax' and 'ymax'.
+
+    Inputs
+    ------
+    model: ultralytics.YOLO - YOLO26 model to be used for prediction
+
+    image: PIL.Image - image to run the model on
+
+    Returns
+    -------
+    pandas.DataFrame - one row per detected object
+    """
+    results = model.predict(source=image, verbose=False)
+    rows = []
+    if results:
+        res = results[0]
+        if res.boxes is not None and len(res.boxes) > 0:
+            for box in res.boxes:
+                x1, y1, x2, y2 = box.xyxy.tolist()
+                rows.append({
+                    'name': model.names[int(box.cls.item())],
+                    'confidence': float(box.conf.item()),
+                    'xmin': x1,
+                    'ymin': y1,
+                    'xmax': x2,
+                    'ymax': y2,
+                })
+    return pd.DataFrame(rows)
 
 def draw_own_bbox(img,x1,y1,x2,y2,label,color=(36,255,12),text_color=(0,0,0)):
     """
@@ -132,7 +168,7 @@ def predict_image(image, model, signal):
     ------
     image: str - name of the image file
 
-    model: torch.hub.load - model to be used for prediction
+    model: ultralytics.YOLO - model to be used for prediction
 
     signal: str - signal to be used for filtering the predictions
 
@@ -145,13 +181,9 @@ def predict_image(image, model, signal):
         img = Image.open(os.path.join('uploads', image))
 
         # Predict the image using the model
-        results = model(img)
+        df_results = _results_to_df(model, img)
 
-        # Images with predicted bounding boxes are saved in the runs folder
-        results.save('runs')
-
-        # Convert the results to a pandas dataframe and calculate the height and width of the bounding box and the area of the bounding box
-        df_results = results.pandas().xyxy[0]
+        # Calculate the height and width of the bounding box and the area of the bounding box
         df_results['bboxHt'] = df_results['ymax'] - df_results['ymin']
         df_results['bboxWt'] = df_results['xmax'] - df_results['xmin']
         df_results['bboxArea'] = df_results['bboxHt'] * df_results['bboxWt']
@@ -277,12 +309,8 @@ def predict_image(image, model, signal):
 def predict_image_week_9(image, model):
     # Load the image
     img = Image.open(os.path.join('uploads', image))
-    # Run inference
-    results = model(img)
-    # Save the results
-    results.save('runs')
-    # Convert the results to a dataframe
-    df_results = results.pandas().xyxy[0]
+    # Run inference and get the detections as a DataFrame
+    df_results = _results_to_df(model, img)
     # Calculate the height and width of the bounding box and the area of the bounding box
     df_results['bboxHt'] = df_results['ymax'] - df_results['ymin']
     df_results['bboxWt'] = df_results['xmax'] - df_results['xmin']
@@ -321,65 +349,60 @@ def predict_image_week_9(image, model):
     return image_id
 
 
-def stitch_image():
+def _collect_annotated_images():
     """
-    Stitches the images in the folder together and saves it into runs/stitched folder
+    Return the list of annotated images in the 'own_results' folder, sorted by the timestamp embedded in their filename
     """
-    # Initialize path to save stitched image
-    imgFolder = 'runs'
-    stitchedPath = os.path.join(imgFolder, f'stitched-{int(time.time())}.jpeg')
+    imgPaths = glob.glob(os.path.join("own_results", "annotated_image_*.jpg"))
+    imgTimestamps = [imgPath.split("_")[-1][:-4] for imgPath in imgPaths]
+    sortedByTimeStampImages = sorted(zip(imgPaths, imgTimestamps), key=lambda x: x[1])
+    return [x[0] for x in sortedByTimeStampImages]
 
-    # Find all files that ends with ".jpg" (this won't match the stitched images as we name them ".jpeg")
-    imgPaths = glob.glob(os.path.join(imgFolder+"/detect/*/", "*.jpg"))
-    # Open all images
+def _stitch_into(imgPaths, stitchedPath):
+    """
+    Stitch the given list of images horizontally into a single image saved at stitchedPath
+
+    Inputs
+    ------
+    imgPaths: list of str - paths of the images to be stitched
+
+    stitchedPath: str - path where the stitched image is to be saved
+
+    Returns
+    -------
+    PIL.Image - the stitched image
+    """
     images = [Image.open(x) for x in imgPaths]
-    # Get the width and height of each image
     width, height = zip(*(i.size for i in images))
-    # Calculate the total width and max height of the stitched image, as we are stitching horizontally
     total_width = sum(width)
     max_height = max(height)
     stitchedImg = Image.new('RGB', (total_width, max_height))
     x_offset = 0
-
-    # Stitch the images together
     for im in images:
         stitchedImg.paste(im, (x_offset, 0))
         x_offset += im.size[0]
-    # Save the stitched image to the path
     stitchedImg.save(stitchedPath)
-
-    # Move original images to "originals" subdirectory
-    for img in imgPaths:
-        shutil.move(img, os.path.join(
-            "runs", "originals", os.path.basename(img)))
-
     return stitchedImg
+
+def stitch_image():
+    """
+    Stitches the annotated images in the 'own_results' folder together and saves it into the runs/stitched folder
+    """
+    imgPaths = _collect_annotated_images()
+    if not imgPaths:
+        raise Exception("No annotated images found to stitch.")
+    os.makedirs('runs', exist_ok=True)
+    stitchedPath = os.path.join('runs', f'stitched-{int(time.time())}.jpeg')
+    return _stitch_into(imgPaths, stitchedPath)
 
 def stitch_image_own():
     """
-    Stitches the images in the folder together and saves it into own_results folder
+    Stitches the annotated images in the 'own_results' folder together and saves it into the 'own_results' folder
 
-    Basically similar to stitch_image() but with different folder names and slightly different drawing of bounding boxes and text
+    Redundant version of stitch_image(), provided so that if one stitching function fails, the other can still run
     """
-    imgFolder = 'own_results'
-    stitchedPath = os.path.join(imgFolder, f'stitched-{int(time.time())}.jpeg')
-
-    imgPaths = glob.glob(os.path.join(imgFolder+"/annotated_image_*.jpg"))
-    imgTimestamps = [imgPath.split("_")[-1][:-4] for imgPath in imgPaths]
-    
-    sortedByTimeStampImages = sorted(zip(imgPaths, imgTimestamps), key=lambda x: x[1])
-
-    images = [Image.open(x[0]) for x in sortedByTimeStampImages]
-    width, height = zip(*(i.size for i in images))
-    total_width = sum(width)
-    max_height = max(height)
-    stitchedImg = Image.new('RGB', (total_width, max_height))
-    x_offset = 0
-
-    for im in images:
-        stitchedImg.paste(im, (x_offset, 0))
-        x_offset += im.size[0]
-    stitchedImg.save(stitchedPath)
-
-    return stitchedImg
-
+    imgPaths = _collect_annotated_images()
+    if not imgPaths:
+        raise Exception("No annotated images found to stitch.")
+    stitchedPath = os.path.join("own_results", f'stitched-{int(time.time())}.jpeg')
+    return _stitch_into(imgPaths, stitchedPath)

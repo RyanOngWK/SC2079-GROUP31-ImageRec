@@ -7,6 +7,8 @@
 </p>
 
 ## About
+2026 Update: This repository has been migrated to train and run [YOLO26](https://docs.ultralytics.com/models/yolo26/) (Ultralytics' latest model family, NMS-free and end-to-end). Use `YOLO26_Training.ipynb` to train and the inference server now loads YOLO26 checkpoints via the `ultralytics` package. The old YOLOv5/v7/v8 notebooks and the vendored YOLOv5 server code are still in the repo for reference, and the old `Weights/*.pt` are YOLOv5-only checkpoints that must be retrained for YOLO26.
+
 2024 August Update: Someone sent me the slides from the briefing of this semester, this repository, along with my other MDP-related ones, are entirely STILL reusable as far as I can see. SCSE can become CCDS but MDP is still MDP. As usual, retrain the YOLO model (or use something more recent la). Once again, that is a 1-day thing. If you are using these repositories and you don't have a functioning, fully-integrated system by end of Week 4, reconsider your life choices and your peer evaluations.
 
 2023 Semester 1 Update: At least from what my juniors told me, this repository, along with my other MDP-related ones, are entirely reusuable. The only exception is that you will need to retrain the YOLO model since the fonts/colors were changed. That is a 1-day thing. If you are using these repositories and you don't have a functioning, fully-integrated system by end of Week 4, reconsider your life choices.
@@ -15,7 +17,7 @@ Y'all, if you are using this code, which apparently a LOT of y'all are, at least
 
 This repository contains the code for the image recognition component of the CZ3004/SC2079 Multidisciplinary Project. The repository is responsible for the following:
 - Data collection using Raspberry Pi camera
-- Training pipeline for YOLOv5, v7 and v8 models
+- Training pipeline for YOLO26 models (legacy YOLOv5, v7 and v8 training notebooks are kept for reference)
 - Inference server for performing inference on the images captured by the robot to identify the symbols and stitching the images together to form a summary of the results
 
 To get semantics out of the way, yes, this is actually an object detection task. But for some reason, NTU has called it image recogntion, so I will be using the term `image recognition` throughout this repository. 
@@ -62,6 +64,8 @@ As the symbol recognition/detection task is incredibly easy, I did not have to d
 
 ### 4. Model Training/Finetuning
 
+The recommended way is to train with `YOLO26_Training.ipynb` in the `Notebooks/Model Training Notebooks` folder. The notebook runs offline on your own machine (NVIDIA GPU / CUDA) via the `ultralytics` package - it has no Google Colab dependency. The legacy `YOLOv5_Training.ipynb`, `YOLOv7_Training.ipynb` and `YOLOv8_Training.ipynb` notebooks are kept for reference only and produce weights that cannot be loaded by the YOLO26 inference server.
+
 Then, I just combined the pretraining and the annotated data, and trained the models using the training notebooks.
 
 Only one word of caution here, be sure to turn off the horizontal flip image augmentation which is enabled by default, as we do not want the model to be confused for the left and right arrow symbols. 
@@ -93,7 +97,7 @@ Since LibCamera is used to calibrate the camera, it is also used to capture the 
 ## Model 
 
 ### Model Architecture
-I experimented with YOLOv5, v7, and v8, and found all three to give roughly the same performance and same latency for inference. So, I just used v5 in the end. The model architecture really does not matter in this task as long as it is modern enough. 
+I originally experimented with YOLOv5, v7, and v8, and found all three to give roughly the same performance and same latency for inference. The repo has since been migrated to [YOLO26](https://docs.ultralytics.com/models/yolo26/) - the latest Ultralytics family, which is smaller, faster, NMS-free (native end-to-end inference) and more accurate than its predecessors. Use the YOLO26 checkpoint sizes `yolo26n.pt`, `yolo26s.pt`, `yolo26m.pt`, `yolo26l.pt` or `yolo26x.pt` as the pretrained starting points in the training notebook.
 
 ### Model Weights
 
@@ -101,14 +105,20 @@ Weights for YOLOv5, v7, and v8 models are available in the `Weights` folder. The
 
 `Week_8.pt` and `Week_9.pt` are the models that I eventually used for the actual tasks. Both are just YOLOv5 models. Week 8 models are trained on all symbols, while Week 9 models are only trained on left, right and bullseye symbols. `Week_9.pt` is further finetuned on a harsh sunlight dataset that I collected, so it should be able to perform much better outdoors.
 
+> **Important:** All weights in `Weights/` are **YOLOv5 checkpoints**. They **cannot** be loaded by the YOLO26-based inference server (the architectures are incompatible). Train a new model with `YOLO26_Training.ipynb`, download the resulting `best.pt`, and place it in the inference server directory as e.g. `YOLO26_Week_8.pt` (Task 1, all symbols) or `YOLO26_Week_9.pt` (Task 2, left/right/bullseye), matching the path in `model.py`.
+
 ## Datasets
 I have not included the datasets I used/collected here, but if you do need them, feel free to contact me.
 
-## Inference Server (only for YOLOv5)
+## Inference Server (YOLO26)
+
+The server is a Flask app that loads a trained YOLO26 checkpoint through the `ultralytics` package and serves it over HTTP so the Raspberry Pi can POST images and receive the recognised symbol back. The vendored YOLOv5 source in the `models/` and `utils/` folders (plus `hubconf.py`) is legacy code from the YOLOv5 days and is **not used** anymore - the server depends only on `ultralytics`.
 
 ```bash
 pip install -r requirements.txt
 ```
+
+Place your trained YOLO26 checkpoint in this folder and make sure the path in `load_model()` (`model.py`) points to it (e.g. `YOLO26_Week_9.pt`).
 
 Start the server by
 
@@ -118,12 +128,10 @@ python main.py
 
 The server will be running at `localhost:5000`
 
-You can modify the code easily to adapt it for v7 or v8 models if you need to.
-
 Some miscellaneous notes:
 - Raw images from Raspberry Pi are stored in the `uploads` folder.
-- After calling the `image/` endpoint, the annotated image (with bounding box and label) is stored in the `runs` and `own_results` folder.
-- After calling the `stitch/` endpoint, two stitched images using two different functions (for redundancy) are saved at `runs/stitched.jpg` and in the `own_results` folder.
+- After calling the `image/` endpoint, the annotated image (with bounding box and label) is stored in the `own_results` folder.
+- After calling the `stitch/` endpoint, two stitched images using two different functions (for redundancy) are saved at `runs/stitched-<timestamp>.jpeg` and in the `own_results` folder.
 
 ### API Endpoints:
 
@@ -138,12 +146,13 @@ response = requests.post(url, files={"file": (filename, image_data)})
 ```
 
 - `image_data`: a `bytes` object
+- The filename must follow the format `<timestamp>_<obstacle_id>_<signal>.jpg`, e.g. `1690000000_1_C.jpg`. The server parses `obstacle_id` out of it to include in the response, and for Task 1 the `signal` (`L`/`R`/`C`) is used as a heuristic to disambiguate between symbols.
 
 The API will then perform three operations:
 
-1. Save the received file into the `/uploads` and `/own_results` folders.
-2. Use the model to identify the image, save the results into the folders above.
-3. Return the class name as a `json` response.
+1. Save the received file into the `/uploads` folder.
+2. Use the model to identify the image, save the annotated result into the `own_results` folder.
+3. Return the class as a `json` response.
 
 **Sample JSON response**
 
@@ -154,13 +163,13 @@ The API will then perform three operations:
 }
 ```
 
-Please note that the inference pipeline is different for Task 1 and Task 2, be sure to comment/uncomment the appropriate lines in `app.py` before running the API.
+Please note that the inference pipeline is different for Task 1 and Task 2, be sure to comment/uncomment the appropriate lines in `main.py` before running the API (`predict_image` for the Week 8/Task 1 model, `predict_image_week_9` for the Week 9/Task 2 model).
 
 ##### 2. POST Request to /stitch
 
 This will trigger the `stitch_image` and `stitch_image_own` functions.
 
-- Images found in the `run/` and `own_results` directory will be stitched together and saved separately, producing two stitched images. We have two functions for redundancy purposes. In case one fails, the other can still run.
+- The annotated images found in the `own_results` directory will be stitched together and saved separately, producing two stitched images. We have two functions for redundancy purposes. In case one fails, the other can still run.
 
 # Disclaimer
 
