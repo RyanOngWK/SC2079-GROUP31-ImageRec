@@ -34,7 +34,7 @@ def load_model():
     ../Weights folder cannot be loaded by YOLO26 and must be retrained first.
     """
     from ultralytics import YOLO
-    model = YOLO(r"C:\Users\ryano\Downloads\ntu\SC2079-GROUP31-ImageRec\Notebooks\Model Training Notebooks\runs\detect\runs\train\weights\best.pt")
+    model = YOLO(r'C:\\Users\\ryano\\Downloads\\ntu\\SC2079-GROUP31-ImageRec\\Notebooks\\Model Training Notebooks\\runs\\detect\\runs\\train\\weights\\best.pt')
     return model
 
 def _results_to_df(model, image):
@@ -59,7 +59,7 @@ def _results_to_df(model, image):
         res = results[0]
         if res.boxes is not None and len(res.boxes) > 0:
             for box in res.boxes:
-                x1, y1, x2, y2 = box.xyxy.flatten().tolist()
+                x1, y1, x2, y2 = box.xyxy.tolist()
                 rows.append({
                     'name': model.names[int(box.cls.item())],
                     'confidence': float(box.conf.item()),
@@ -211,7 +211,7 @@ def predict_image(image, model, signal):
             current_area = pred_list.iloc[0]['bboxArea']
             # For each prediction, check if the confidence is greater than 0.5 and if the area is greater than 80% of the current area or 60% if the prediction is 'One'
             for _, row in pred_list.iterrows():
-                if row['name'] != 'Bullseye' and row['confidence'] > 0.25 and ((current_area * 0.8 <= row['bboxArea']) or (row['name'] == 'One' and current_area * 0.6 <= row['bboxArea'])):
+                if row['name'] != 'Bullseye' and row['confidence'] > 0.5 and ((current_area * 0.8 <= row['bboxArea']) or (row['name'] == 'One' and current_area * 0.6 <= row['bboxArea'])):
                     # Add the prediction to the shortlist
                     pred_shortlist.append(row)
                     # Update the current area to the area of the prediction
