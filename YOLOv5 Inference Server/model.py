@@ -34,7 +34,8 @@ def load_model():
     ../Weights folder cannot be loaded by YOLO26 and must be retrained first.
     """
     from ultralytics import YOLO
-    model = YOLO(r"C:\Users\ryano\Downloads\ntu\SC2079-GROUP31-ImageRec\Notebooks\Model Training Notebooks\runs\detect\runs\train\weights\best.pt")
+    model = os.path.abspath(os.path.join(os.path.dirname(__file__), "weights", "best.pt"))
+    model = YOLO(model)
     return model
 
 def _results_to_df(model, image):
